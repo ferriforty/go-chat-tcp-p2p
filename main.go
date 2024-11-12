@@ -39,22 +39,32 @@ type Client struct {
 	writer *bufio.Writer
 }
 
-func NewClient(conn net.Conn, chatRoom *ChatRoom) *Client {
-	reader := bufio.NewReader(conn)
-	writer := bufio.NewWriter(conn)
+func (client *Client) Quit() {
+	client.conn.Close()
+}
+
+func NewClient(chatRoom *ChatRoom) *Client {
 	log.Println("client")
 	client := &Client {
 		name:     "",
 		chatRoom: chatRoom,
 		incoming: make(chan *Message),
 		outgoing: make(chan string),
-		conn:     conn,
-		reader:   reader,
-		writer:   writer,
+		conn:     nil,
+		reader:   nil,
+		writer:   nil,
 	}
 
-	client.Listen()
 	return client
+}
+
+func (client *Client) SetConnection(conn net.Conn) {
+	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
+	client.conn = conn
+	client.reader = reader
+	client.writer = writer
+	client.Listen()
 }
 
 func (client *Client) Parse() {
@@ -64,7 +74,7 @@ func (client *Client) Parse() {
 			default:
 				fmt.Print(message.String())
 			case strings.HasPrefix(message.text, CMD_INIT):
-				client.name = strings.TrimSuffix(strings.TrimPrefix(message.text, CMD_INIT+" "), "\n")
+				client.name = strings.TrimSpace(strings.TrimPrefix(message.text, CMD_INIT+" "))
 			}
 		}
 	}()
@@ -134,13 +144,18 @@ func (client *Client)ClientWrite(conn net.Conn) {
 	reader := bufio.NewReader(os.Stdin)
 	writer := bufio.NewWriter(conn)
 
-	log.Print("Enter name: ")
-	text, err := reader.ReadString('\n')
-	if err != nil {
-		log.Println(err)
+	name := client.name
+
+	if client.name == "" {
+		log.Print("Enter name: ")
+		text, err := reader.ReadString('\n')
+		if err != nil {
+			log.Println(err)
+		}
+		name = text
 	}
 
-	_, err = writer.WriteString(CMD_INIT + " " + text)
+	_, err := writer.WriteString(CMD_INIT + " " + name)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -189,23 +204,25 @@ func main() {
 	}
 	defer listener.Close()
 	log.Println("listening on port", "localhost" + connPort)
-
+	
+	client := NewClient(chatRoom)
 	if len(os.Args) >= 3 {
 
 		conn, err := net.Dial(CONN_TYPE, os.Args[2])
 		if err != nil {
 			fmt.Println(err)
 		}
-		client := NewClient(conn, chatRoom)
-		chatRoom.Join(client)
+		client.SetConnection(conn)
 	}
 
 	for {
+		chatRoom.Join(client)
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Println("Error: ", err)
 			continue
 		}
-		chatRoom.Join(NewClient(conn, chatRoom))
+		client = NewClient(chatRoom)
+		client.SetConnection(conn)
 	}
 }
