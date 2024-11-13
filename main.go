@@ -17,8 +17,6 @@ const (
 	CMD_PREFIX = "/"
 	CMD_JOIN   = CMD_PREFIX + "join"
 	CMD_DIAL   = CMD_PREFIX + "dial"
-	CMD_LEAVE  = CMD_PREFIX + "leave"
-	CMD_QUIT   = CMD_PREFIX + "quit"
 	CMD_INIT   = CMD_PREFIX + "init"
 )
 
@@ -31,10 +29,6 @@ type Client struct {
 	conn net.Conn
 	reader *bufio.Reader
 	writer *bufio.Writer
-}
-
-func (client *Client) Quit() {
-	client.conn.Close()
 }
 
 func NewClient(chatRoom *ChatRoom, conn net.Conn) *Client {
@@ -53,12 +47,31 @@ func NewClient(chatRoom *ChatRoom, conn net.Conn) *Client {
 	return client
 }
 
+//remove element from array
+func remove(s []*Client, toDelete *Client) []*Client {
+	for i, client := range(s) {
+		if client == toDelete {
+			s[i] = s[len(s)-1]
+			return s[:len(s)-1]
+		}
+	}
+	return s
+}
+
+// Function called when connection closed
+func (client *Client) Quit() {
+	fmt.Println(client.name + " has left the chat")
+	client.chatRoom.clients = remove(client.chatRoom.clients, client)
+	client.conn.Close()
+}
+
 // Reads and parse the string received, if it has some prefix than it does some function. if not, it prints it
 func (client *Client) Read() {
 	go func() {
 		for message := range client.incoming {
 			switch {
 			default:
+				client.chatRoom.messages = append(client.chatRoom.messages, message)
 				fmt.Print(message.String())
 			case strings.HasPrefix(message.text, CMD_INIT):
 				client.name = strings.TrimSpace(strings.TrimPrefix(message.text, CMD_INIT+" "))
@@ -88,19 +101,13 @@ func (client *Client) Read() {
 	}()
 }
 
-// sends the message to all the clients connected
-func (chatRoom *ChatRoom) Broadcast(message string) {
-	for _, client := range chatRoom.clients {
-		client.outgoing <- message
-	}
-}
-
 // if a message is inserted in the outgoing field, than it is printed
 func (client *Client) Write() {
 	for message := range client.outgoing {
 
 		_, err := client.writer.WriteString(message)
 		if err != nil {
+			client.Quit()
 			fmt.Println(err)
 			os.Exit(1)
 		}
@@ -112,6 +119,35 @@ func (client *Client) Write() {
 	}
 }
 
+// Reads all incoming messages and put them in the incoming field.
+func (client *Client)ClientRead(conn net.Conn) {
+	reader := bufio.NewReader(conn)
+	for {
+		str, err := reader.ReadString('\n')
+		if err != nil {
+			client.Quit()
+			return
+		}
+		message := NewMessage(time.Now(), client, strings.TrimSuffix(str, "\n"))
+		client.incoming <- message
+	}
+}
+
+// Reads from Stdin, and outputs to the socket.
+func (client *Client)ClientWrite(conn net.Conn) {
+	reader := bufio.NewReader(os.Stdin)
+	client.chatRoom.Broadcast(CMD_INIT + " " + client.chatRoom.myName)
+
+	for {
+		str, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		client.chatRoom.Broadcast(str)
+	}
+}
+
 // starts all the go-routines
 func (client *Client) Listen() {
 	go client.Read()
@@ -120,19 +156,12 @@ func (client *Client) Listen() {
 	go client.ClientWrite(client.conn)
 }
 
-func NewMessage(time time.Time, client *Client, text string) *Message {
-	return &Message{
-		time:   time,
-		client: client,
-		text:   text,
-	}
-}
-
 type ChatRoom struct {
 	myName string
 	clients  []*Client
 	incoming chan *Message
 	connPort string
+	messages []*Message
 	join chan *Client
 }
 
@@ -154,44 +183,30 @@ func (chatRoom *ChatRoom) Join(client *Client) {
 	chatRoom.clients = append(chatRoom.clients, client)
 }
 
+// sends the message to all the clients connected
+func (chatRoom *ChatRoom) Broadcast(message string) {
+	for _, client := range chatRoom.clients {
+		client.outgoing <- message
+	}
+}
+
 type Message struct {
 	time time.Time
 	client *Client
 	text string
 }
 
+func NewMessage(time time.Time, client *Client, text string) *Message {
+	return &Message{
+		time:   time,
+		client: client,
+		text:   text,
+	}
+}
+
 // format the string to send
 func (message *Message) String() string {
 	return fmt.Sprintf("%s - %s: %s\n", message.time.Format(time.Kitchen), message.client.name, message.text)
-}
-
-// Reads all incoming messages and put them in the incoming field.
-func (client *Client)ClientRead(conn net.Conn) {
-	reader := bufio.NewReader(conn)
-	for {
-		str, err := reader.ReadString('\n')
-		if err != nil {
-			return
-		}
-		message := NewMessage(time.Now(), client, strings.TrimSuffix(str, "\n"))
-		client.incoming <- message
-	}
-}
-
-// Reads from Stdin, and outputs to the socket.
-func (client *Client)ClientWrite(conn net.Conn) {
-	reader := bufio.NewReader(os.Stdin)
-	client.chatRoom.Broadcast(CMD_INIT + " " + client.chatRoom.myName)
-
-	for {
-		str, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		client.chatRoom.Broadcast(str)
-	}
 }
 
 func main() {
@@ -233,6 +248,7 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
+
 		client := NewClient(chatRoom, conn)
 		chatRoom.Join(client)
 		client.outgoing <- CMD_JOIN + " " + CMD_DIAL + " " + connPort + "\n"
@@ -245,6 +261,8 @@ func main() {
 			log.Println("Error: ", err)
 			continue
 		}
-		chatRoom.Join(NewClient(chatRoom, conn))
+		client := NewClient(chatRoom, conn)
+		chatRoom.Join(client)
+
 	}
 }
