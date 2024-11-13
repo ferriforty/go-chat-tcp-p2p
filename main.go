@@ -15,17 +15,13 @@ const (
 	CONN_TYPE = "tcp"
 
 	CMD_PREFIX = "/"
-	CMD_CREATE = CMD_PREFIX + "create"
-	CMD_LIST   = CMD_PREFIX + "list"
 	CMD_JOIN   = CMD_PREFIX + "join"
+	CMD_DIAL   = CMD_PREFIX + "dial"
 	CMD_LEAVE  = CMD_PREFIX + "leave"
-	CMD_HELP   = CMD_PREFIX + "help"
-	CMD_NAME   = CMD_PREFIX + "name"
 	CMD_QUIT   = CMD_PREFIX + "quit"
 	CMD_INIT   = CMD_PREFIX + "init"
 
 	MSG_CONNECT = "Welcome to the server! Type \"/help\" to get a list of commands.\n"
-	MSG_FULL    = "Server is full. Please try reconnecting later."
 )
 
 
@@ -44,7 +40,6 @@ func (client *Client) Quit() {
 }
 
 func NewClient(chatRoom *ChatRoom, conn net.Conn) *Client {
-	log.Println("client")
 	client := &Client {
 		name:     "",
 		chatRoom: chatRoom,
@@ -67,7 +62,27 @@ func (client *Client) Read() {
 			default:
 				fmt.Print(message.String())
 			case strings.HasPrefix(message.text, CMD_INIT):
-				client.name = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(message.text, CMD_INIT+" "), "\n"))
+				client.name = strings.TrimSpace(strings.TrimPrefix(message.text, CMD_INIT+" "))
+			case strings.HasPrefix(message.text, CMD_JOIN):
+				client.chatRoom.Broadcast(strings.TrimSpace(strings.TrimPrefix(message.text, CMD_JOIN+" ")) + "\n")
+			case strings.HasPrefix(message.text, CMD_DIAL):
+				port := strings.TrimSpace(strings.TrimPrefix(message.text, CMD_DIAL+" "))
+				if client.chatRoom.connPort == port {
+					break
+				}
+				for _, x := range client.chatRoom.clients {
+					conn := x.conn.LocalAddr().String()
+					presentPort := strings.Split(conn, ":")[1]
+					if port != (":" + presentPort) {
+						conn, err := net.Dial(CONN_TYPE, port)
+						if err != nil {
+							fmt.Println(err)
+						}
+						client := NewClient(x.chatRoom, conn)
+						x.chatRoom.Join(client)
+						break
+					}
+				}
 			}
 		}
 	}()
@@ -114,15 +129,17 @@ type ChatRoom struct {
 	myName string
 	clients  []*Client
 	incoming chan *Message
+	connPort string
 	join chan *Client
 }
 
-func NewChatRoom() *ChatRoom {
+func NewChatRoom(connPort string) *ChatRoom {
 
 	chatRoom := &ChatRoom{
 		myName: "",
 		clients: make([]*Client, 0),
 		incoming: make(chan *Message),
+		connPort: connPort,
 		join: make(chan *Client),
 	}
 
@@ -158,8 +175,6 @@ func (client *Client)ClientRead(conn net.Conn) {
 // Reads from Stdin, and outputs to the socket.
 func (client *Client)ClientWrite(conn net.Conn) {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println(client.chatRoom.clients)
-
 	client.chatRoom.Broadcast(CMD_INIT + " " + client.chatRoom.myName)
 
 	for {
@@ -175,13 +190,16 @@ func (client *Client)ClientWrite(conn net.Conn) {
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	// Checks if the params are correct
 	if len(os.Args) <= 1 {
 		log.Println("required server port as parameter 1 and port to connect to as parameter 2(optional)")
 		os.Exit(1)
 	}
 
+	// Takes connection port and creates the listener, assuming the connection port given is correct (:xxxx)
 	connPort := os.Args[1]
-	chatRoom := NewChatRoom()
+	chatRoom := NewChatRoom(connPort)
 
 	listener, err := net.Listen(CONN_TYPE, "localhost" + connPort)
 	if err != nil {
@@ -193,7 +211,8 @@ func main() {
 	
 	reader := bufio.NewReader(os.Stdin)
 	
-	log.Print("Enter name: ")
+	// Before doing anything i wait for the user name 
+	fmt.Print("Enter name: ")
 	text, err := reader.ReadString('\n')
 	if err != nil {
 		log.Println(err)
@@ -207,7 +226,9 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		chatRoom.Join(NewClient(chatRoom, conn))
+		client := NewClient(chatRoom, conn)
+		chatRoom.Join(client)
+		client.outgoing <- CMD_JOIN + " " + CMD_DIAL + " " + connPort + "\n"
 	}
 
 	for {
