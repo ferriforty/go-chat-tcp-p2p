@@ -43,47 +43,63 @@ func (client *Client) Quit() {
 	client.conn.Close()
 }
 
-func NewClient(chatRoom *ChatRoom) *Client {
+func NewClient(chatRoom *ChatRoom, conn net.Conn) *Client {
 	log.Println("client")
 	client := &Client {
 		name:     "",
 		chatRoom: chatRoom,
 		incoming: make(chan *Message),
 		outgoing: make(chan string),
-		conn:     nil,
+		conn:     conn,
 		reader:   nil,
 		writer:   nil,
 	}
-
+	client.reader = bufio.NewReader(conn)
+	client.writer = bufio.NewWriter(conn)
+	client.Listen()
 	return client
 }
 
-func (client *Client) SetConnection(conn net.Conn) {
-	reader := bufio.NewReader(conn)
-	writer := bufio.NewWriter(conn)
-	client.conn = conn
-	client.reader = reader
-	client.writer = writer
-	client.Listen()
-}
-
-func (client *Client) Parse() {
+func (client *Client) Read() {
 	go func() {
 		for message := range client.incoming {
 			switch {
 			default:
 				fmt.Print(message.String())
 			case strings.HasPrefix(message.text, CMD_INIT):
-				client.name = strings.TrimSpace(strings.TrimPrefix(message.text, CMD_INIT+" "))
+				client.name = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(message.text, CMD_INIT+" "), "\n"))
 			}
 		}
 	}()
 }
 
+func (chatRoom *ChatRoom) Broadcast(message string) {
+	for _, client := range chatRoom.clients {
+		client.outgoing <- message
+	}
+}
+
+func (client *Client) Write() {
+	for message := range client.outgoing {
+
+		_, err := client.writer.WriteString(message)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		err = client.writer.Flush()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}
+}
+
 func (client *Client) Listen() {
+	go client.Read()
+	go client.Write()
 	go client.ClientRead(client.conn)
 	go client.ClientWrite(client.conn)
-	go client.Parse()
 }
 
 func NewMessage(time time.Time, client *Client, text string) *Message {
@@ -95,18 +111,18 @@ func NewMessage(time time.Time, client *Client, text string) *Message {
 }
 
 type ChatRoom struct {
+	myName string
 	clients  []*Client
 	incoming chan *Message
-	messages []*Message
 	join chan *Client
 }
 
 func NewChatRoom() *ChatRoom {
 
 	chatRoom := &ChatRoom{
+		myName: "",
 		clients: make([]*Client, 0),
 		incoming: make(chan *Message),
-		messages: make([]*Message, 0),
 		join: make(chan *Client),
 	}
 
@@ -142,30 +158,9 @@ func (client *Client)ClientRead(conn net.Conn) {
 // Reads from Stdin, and outputs to the socket.
 func (client *Client)ClientWrite(conn net.Conn) {
 	reader := bufio.NewReader(os.Stdin)
-	writer := bufio.NewWriter(conn)
+	fmt.Println(client.chatRoom.clients)
 
-	name := client.name
-
-	if client.name == "" {
-		log.Print("Enter name: ")
-		text, err := reader.ReadString('\n')
-		if err != nil {
-			log.Println(err)
-		}
-		name = text
-	}
-
-	_, err := writer.WriteString(CMD_INIT + " " + name)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	err = writer.Flush()
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	client.chatRoom.Broadcast(CMD_INIT + " " + client.chatRoom.myName)
 
 	for {
 		str, err := reader.ReadString('\n')
@@ -174,16 +169,7 @@ func (client *Client)ClientWrite(conn net.Conn) {
 			os.Exit(1)
 		}
 
-		_, err = writer.WriteString(str)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		err = writer.Flush()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+		client.chatRoom.Broadcast(str)
 	}
 }
 
@@ -205,24 +191,31 @@ func main() {
 	defer listener.Close()
 	log.Println("listening on port", "localhost" + connPort)
 	
-	client := NewClient(chatRoom)
+	reader := bufio.NewReader(os.Stdin)
+	
+	log.Print("Enter name: ")
+	text, err := reader.ReadString('\n')
+	if err != nil {
+		log.Println(err)
+	}
+
+	chatRoom.myName = text
+
 	if len(os.Args) >= 3 {
 
 		conn, err := net.Dial(CONN_TYPE, os.Args[2])
 		if err != nil {
 			fmt.Println(err)
 		}
-		client.SetConnection(conn)
+		chatRoom.Join(NewClient(chatRoom, conn))
 	}
 
 	for {
-		chatRoom.Join(client)
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Println("Error: ", err)
 			continue
 		}
-		client = NewClient(chatRoom)
-		client.SetConnection(conn)
+		chatRoom.Join(NewClient(chatRoom, conn))
 	}
 }
