@@ -20,8 +20,6 @@ const (
 	CMD_LEAVE  = CMD_PREFIX + "leave"
 	CMD_QUIT   = CMD_PREFIX + "quit"
 	CMD_INIT   = CMD_PREFIX + "init"
-
-	MSG_CONNECT = "Welcome to the server! Type \"/help\" to get a list of commands.\n"
 )
 
 
@@ -55,6 +53,7 @@ func NewClient(chatRoom *ChatRoom, conn net.Conn) *Client {
 	return client
 }
 
+// Reads and parse the string received, if it has some prefix than it does some function. if not, it prints it
 func (client *Client) Read() {
 	go func() {
 		for message := range client.incoming {
@@ -70,6 +69,7 @@ func (client *Client) Read() {
 				if client.chatRoom.connPort == port {
 					break
 				}
+				// i check if the client connecting is already present in my clients. if it is not, the i add it.
 				for _, x := range client.chatRoom.clients {
 					conn := x.conn.LocalAddr().String()
 					presentPort := strings.Split(conn, ":")[1]
@@ -88,12 +88,14 @@ func (client *Client) Read() {
 	}()
 }
 
+// sends the message to all the clients connected
 func (chatRoom *ChatRoom) Broadcast(message string) {
 	for _, client := range chatRoom.clients {
 		client.outgoing <- message
 	}
 }
 
+// if a message is inserted in the outgoing field, than it is printed
 func (client *Client) Write() {
 	for message := range client.outgoing {
 
@@ -110,6 +112,7 @@ func (client *Client) Write() {
 	}
 }
 
+// starts all the go-routines
 func (client *Client) Listen() {
 	go client.Read()
 	go client.Write()
@@ -146,6 +149,7 @@ func NewChatRoom(connPort string) *ChatRoom {
 	return chatRoom
 }
 
+// add client to the chatroom
 func (chatRoom *ChatRoom) Join(client *Client) {
 	chatRoom.clients = append(chatRoom.clients, client)
 }
@@ -156,10 +160,12 @@ type Message struct {
 	text string
 }
 
+// format the string to send
 func (message *Message) String() string {
 	return fmt.Sprintf("%s - %s: %s\n", message.time.Format(time.Kitchen), message.client.name, message.text)
 }
 
+// Reads all incoming messages and put them in the incoming field.
 func (client *Client)ClientRead(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	for {
@@ -220,6 +226,7 @@ func main() {
 
 	chatRoom.myName = text
 
+	// If the user putted a server to connect to i connect to it and broadcast to everyone the port, to let everyone know there is a new member
 	if len(os.Args) >= 3 {
 
 		conn, err := net.Dial(CONN_TYPE, os.Args[2])
@@ -231,6 +238,7 @@ func main() {
 		client.outgoing <- CMD_JOIN + " " + CMD_DIAL + " " + connPort + "\n"
 	}
 
+	// Waits for a new client to connect.
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
