@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"encoding/json"
 )
 
 
@@ -18,8 +19,15 @@ const (
 	CMD_JOIN   = CMD_PREFIX + "join"
 	CMD_DIAL   = CMD_PREFIX + "dial"
 	CMD_INIT   = CMD_PREFIX + "init"
-)
+	CMD_CHATSEND   = CMD_PREFIX + "chatS"
+	CMD_CHATRECEIVE   = CMD_PREFIX + "chatR"
 
+	PURPLE_CLR = "\033[35m"
+	BLACK_CLR = "\033[30m"
+	YELLOW_CLR = "\033[33m"
+	GREEN_CLR = "\033[32m"
+	RESET_CLR = "\033[0m"
+)
 
 type Client struct {
 	name string
@@ -47,21 +55,10 @@ func NewClient(chatRoom *ChatRoom, conn net.Conn) *Client {
 	return client
 }
 
-//remove element from array
-func remove(s []*Client, toDelete *Client) []*Client {
-	for i, client := range(s) {
-		if client == toDelete {
-			s[i] = s[len(s)-1]
-			return s[:len(s)-1]
-		}
-	}
-	return s
-}
-
 // Function called when connection closed
 func (client *Client) Quit() {
-	fmt.Println(client.name + " has left the chat")
-	client.chatRoom.clients = remove(client.chatRoom.clients, client)
+	fmt.Println(PURPLE_CLR + client.name + " has left the chat" + RESET_CLR)
+	delete(client.chatRoom.clients, client.conn.RemoteAddr().String())
 	client.conn.Close()
 }
 
@@ -71,12 +68,39 @@ func (client *Client) Read() {
 		for message := range client.incoming {
 			switch {
 			default:
-				client.chatRoom.messages = append(client.chatRoom.messages, message)
-				fmt.Print(message.String())
+				mess := message.String()
+				client.chatRoom.messages = append(client.chatRoom.messages, mess)
+				fmt.Print(mess)
+			// On client creation, i set his name
 			case strings.HasPrefix(message.text, CMD_INIT):
 				client.name = strings.TrimSpace(strings.TrimPrefix(message.text, CMD_INIT+" "))
+			// On client creation, one peer sends the chat log to the new client
+			case strings.HasPrefix(message.text, CMD_CHATSEND):
+				port := strings.TrimSpace(strings.TrimPrefix(message.text, CMD_CHATSEND+" "))
+				for _, x := range client.chatRoom.clients {
+
+					if strings.HasSuffix(x.conn.RemoteAddr().String(), port) {
+						mesStr, err := json.Marshal(x.chatRoom.messages)
+						if err != nil {
+							break
+						}
+						x.outgoing <- CMD_CHATRECEIVE + " " + string(mesStr) + "\n"
+					}
+				}
+			// The new client receives the chat and prints it
+			case strings.HasPrefix(message.text, CMD_CHATRECEIVE):
+				messages := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(message.text, CMD_CHATRECEIVE+" "), "\n"))
+				err := json.Unmarshal([]byte(messages), &client.chatRoom.messages)
+				if err != nil {
+					break
+				}
+				for _, x := range client.chatRoom.messages {
+					fmt.Print(x)
+				}
+			// On new client join, a peer broadcasts to everyone his port
 			case strings.HasPrefix(message.text, CMD_JOIN):
 				client.chatRoom.Broadcast(strings.TrimSpace(strings.TrimPrefix(message.text, CMD_JOIN+" ")) + "\n")
+			// The rest of the peers receive the port and connects to it
 			case strings.HasPrefix(message.text, CMD_DIAL):
 				port := strings.TrimSpace(strings.TrimPrefix(message.text, CMD_DIAL+" "))
 				if client.chatRoom.connPort == port {
@@ -104,7 +128,6 @@ func (client *Client) Read() {
 // if a message is inserted in the outgoing field, than it is printed
 func (client *Client) Write() {
 	for message := range client.outgoing {
-
 		_, err := client.writer.WriteString(message)
 		if err != nil {
 			client.Quit()
@@ -136,7 +159,7 @@ func (client *Client)ClientRead(conn net.Conn) {
 // Reads from Stdin, and outputs to the socket.
 func (client *Client)ClientWrite(conn net.Conn) {
 	reader := bufio.NewReader(os.Stdin)
-	client.chatRoom.Broadcast(CMD_INIT + " " + client.chatRoom.myName)
+	client.chatRoom.Broadcast(CMD_INIT + " " + client.chatRoom.pointName)
 
 	for {
 		str, err := reader.ReadString('\n')
@@ -144,6 +167,9 @@ func (client *Client)ClientWrite(conn net.Conn) {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+		client.chatRoom.messages = append(
+			client.chatRoom.messages, 
+			PlainMessage(time.Now(), client.chatRoom.pointName, strings.TrimSuffix(str, "\n")))
 		client.chatRoom.Broadcast(str)
 	}
 }
@@ -157,22 +183,19 @@ func (client *Client) Listen() {
 }
 
 type ChatRoom struct {
-	myName string
-	clients  []*Client
-	incoming chan *Message
+	pointName string
+	clients  map[string]*Client
 	connPort string
-	messages []*Message
-	join chan *Client
+	messages []string
 }
 
 func NewChatRoom(connPort string) *ChatRoom {
 
 	chatRoom := &ChatRoom{
-		myName: "",
-		clients: make([]*Client, 0),
-		incoming: make(chan *Message),
+		pointName: "",
+		clients: make(map[string]*Client),
+		messages: make([]string, 0),
 		connPort: connPort,
-		join: make(chan *Client),
 	}
 
 	return chatRoom
@@ -180,7 +203,8 @@ func NewChatRoom(connPort string) *ChatRoom {
 
 // add client to the chatroom
 func (chatRoom *ChatRoom) Join(client *Client) {
-	chatRoom.clients = append(chatRoom.clients, client)
+	chatRoom.clients[client.conn.RemoteAddr().String()] = client
+	//chatRoom.clients = append(chatRoom.clients, client)
 }
 
 // sends the message to all the clients connected
@@ -206,12 +230,17 @@ func NewMessage(time time.Time, client *Client, text string) *Message {
 
 // format the string to send
 func (message *Message) String() string {
-	return fmt.Sprintf("%s - %s: %s\n", message.time.Format(time.Kitchen), message.client.name, message.text)
+	return fmt.Sprintf(BLACK_CLR + "%s - %s:" + GREEN_CLR + " %s\n" + RESET_CLR, 
+		message.time.Format(time.Kitchen), message.client.name, message.text)
+}
+
+// format the string to send
+func PlainMessage(messTime time.Time, name string, text string) string {
+	return fmt.Sprintf(BLACK_CLR + "%s - %s:" + GREEN_CLR + " %s\n" + RESET_CLR, 
+		messTime.Format(time.Kitchen), strings.TrimSpace(strings.TrimSuffix(name, "\n")), text)
 }
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
 	// Checks if the params are correct
 	if len(os.Args) <= 1 {
 		log.Println("required server port as parameter 1 and port to connect to as parameter 2(optional)")
@@ -228,18 +257,17 @@ func main() {
 		os.Exit(1)
 	}
 	defer listener.Close()
-	log.Println("listening on port", "localhost" + connPort)
+	fmt.Println(PURPLE_CLR +"listening on port", "localhost" + connPort + RESET_CLR)
 	
 	reader := bufio.NewReader(os.Stdin)
 	
 	// Before doing anything i wait for the user name 
-	fmt.Print("Enter name: ")
+	fmt.Print(GREEN_CLR + "Enter name: " + RESET_CLR)
 	text, err := reader.ReadString('\n')
 	if err != nil {
 		log.Println(err)
 	}
-
-	chatRoom.myName = text
+	chatRoom.pointName = text
 
 	// If the user putted a server to connect to i connect to it and broadcast to everyone the port, to let everyone know there is a new member
 	if len(os.Args) >= 3 {
@@ -252,6 +280,7 @@ func main() {
 		client := NewClient(chatRoom, conn)
 		chatRoom.Join(client)
 		client.outgoing <- CMD_JOIN + " " + CMD_DIAL + " " + connPort + "\n"
+		client.outgoing <- CMD_CHATSEND + " " + conn.LocalAddr().String() + "\n"
 	}
 
 	// Waits for a new client to connect.
@@ -263,6 +292,5 @@ func main() {
 		}
 		client := NewClient(chatRoom, conn)
 		chatRoom.Join(client)
-
 	}
 }
