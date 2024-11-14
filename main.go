@@ -23,6 +23,7 @@ const (
 	CMD_CHATRECEIVE   = CMD_PREFIX + "chatR"
 
 	PURPLE_CLR = "\033[35m"
+	CYAN_CLR = "\033[36m" 
 	BLACK_CLR = "\033[30m"
 	YELLOW_CLR = "\033[33m"
 	GREEN_CLR = "\033[32m"
@@ -99,13 +100,16 @@ func (client *Client) Read() {
 				}
 			// On new client join, a peer broadcasts to everyone his port
 			case strings.HasPrefix(message.text, CMD_JOIN):
+				fmt.Println(CYAN_CLR + strings.TrimSpace(strings.Split(message.text, "|")[1]) + " has joined the chat" + RESET_CLR)
 				client.chatRoom.Broadcast(strings.TrimSpace(strings.TrimPrefix(message.text, CMD_JOIN+" ")) + "\n")
 			// The rest of the peers receive the port and connects to it
 			case strings.HasPrefix(message.text, CMD_DIAL):
-				port := strings.TrimSpace(strings.TrimPrefix(message.text, CMD_DIAL+" "))
+				slice := strings.Split(message.text, "|")
+				port := strings.TrimSpace(strings.TrimPrefix(slice[0], CMD_DIAL+" "))
 				if client.chatRoom.connPort == port {
 					break
 				}
+				fmt.Println(CYAN_CLR + slice[1] + " has joined the chat" + RESET_CLR)
 				// i check if the client connecting is already present in my clients. if it is not, the i add it.
 				for _, x := range client.chatRoom.clients {
 					conn := x.conn.LocalAddr().String()
@@ -166,6 +170,8 @@ func (client *Client)ClientWrite(conn net.Conn) {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+		str = strings.TrimPrefix(str, CMD_PREFIX)
+
 		client.chatRoom.messages = append(
 			client.chatRoom.messages, 
 			PlainMessage(time.Now(), client.chatRoom.pointName, strings.TrimSuffix(str, "\n")))
@@ -277,7 +283,7 @@ func main() {
 
 		client := NewClient(chatRoom, conn)
 		chatRoom.Join(client)
-		client.outgoing <- CMD_JOIN + " " + CMD_DIAL + " " + connPort + "\n"
+		client.outgoing <- CMD_JOIN + " "  + CMD_DIAL + " " + connPort + "|" + strings.TrimSuffix(chatRoom.pointName, "\n") + "\n"
 		client.outgoing <- CMD_CHATSEND + " " + conn.LocalAddr().String() + "\n"
 	}
 	// Waits for a new client to connect.
