@@ -43,7 +43,7 @@ func NewClient(chatRoom *ChatRoom, conn net.Conn) *Client {
 	client := &Client {
 		name:     "",
 		chatRoom: chatRoom,
-		incoming: make(chan *Message),
+		incoming: make(chan *Message, 1),
 		outgoing: make(chan string),
 		conn:     conn,
 		reader:   nil,
@@ -160,7 +160,6 @@ func (client *Client)ClientRead(conn net.Conn) {
 func (client *Client)ClientWrite(conn net.Conn) {
 	reader := bufio.NewReader(os.Stdin)
 	client.chatRoom.Broadcast(CMD_INIT + " " + client.chatRoom.pointName)
-
 	for {
 		str, err := reader.ReadString('\n')
 		if err != nil {
@@ -204,7 +203,6 @@ func NewChatRoom(connPort string) *ChatRoom {
 // add client to the chatroom
 func (chatRoom *ChatRoom) Join(client *Client) {
 	chatRoom.clients[client.conn.RemoteAddr().String()] = client
-	//chatRoom.clients = append(chatRoom.clients, client)
 }
 
 // sends the message to all the clients connected
@@ -282,7 +280,6 @@ func main() {
 		client.outgoing <- CMD_JOIN + " " + CMD_DIAL + " " + connPort + "\n"
 		client.outgoing <- CMD_CHATSEND + " " + conn.LocalAddr().String() + "\n"
 	}
-
 	// Waits for a new client to connect.
 	for {
 		conn, err := listener.Accept()
