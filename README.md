@@ -1,6 +1,6 @@
-# Go-UpChat: Peer-to-Peer Group Chat
+# go-chat-tcp-p2p: Peer-to-Peer Group Chat
 
-Go-UpChat is a simple peer-to-peer group chat system that allows users to connect to chat groups by knowing the port of a peer already in the group. 
+go-chat-tcp-p2p is a simple peer-to-peer group chat system, implemented using TCP sockets, that allows users to connect to chat groups by knowing the port of a peer already in the group. 
 
 ## Usage Guide
 
