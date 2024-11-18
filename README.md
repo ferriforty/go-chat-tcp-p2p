@@ -5,12 +5,13 @@ go-chat-tcp-p2p is a simple peer-to-peer group chat system, implemented using TC
 ## Usage Guide
 
 To use this group chat system, follow these steps:
+(If you have downloaded the .exe file, than just follow these steps by running the .exe instead of calling "go run main.go")
 
 ### 1. Clone the Repository
 
 First, clone the repository to your local machine by running:
 ```bash
-git clone [<repository-url>](https://github.com/ferriforty/go-chat-tcp-p2p)
+git clone https://github.com/ferriforty/go-chat-tcp-p2p
 ```
 ### 2. Navigate to the Project Folder
 
