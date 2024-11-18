@@ -39,3 +39,70 @@ go run main.go <your-port> <peer-port>
 
 Once you connect, everyone else will be notified that you've joined the group chat. You will also receive the complete chat history up to that point. From there, you can start chatting with other members of the group!
 Have fun 😆
+
+
+---
+
+## Features
+1. **Decentralized Communication**: 
+   - New clients can connect to any existing client in the network.
+   - Each client broadcasts its presence, ensuring the chat room is dynamically updated.
+2. **Chat History Sharing**:
+   - Existing chat history is shared with new clients to provide context.
+3. **Color-Coded Output**:
+   - Differentiates between messages, system notifications, and user input using ANSI color codes for clarity.
+4. **Concurrency**:
+   - Utilizes Goroutines for non-blocking message reading, writing, and broadcasting.
+5. **Extensibility**:
+   - Modular design with clear roles for `Client`, `ChatRoom`, and `Message`.
+
+---
+
+## Implementation Details
+
+### 1. **Client Handling**
+- **Purpose**: Each client represents a participant in the chat room.
+- **Key Components**:
+  - `incoming`: Channel to handle received messages.
+  - `outgoing`: Channel to queue messages for sending.
+  - `Read()`, `Write()`, `ClientRead()`, and `ClientWrite()` functions to handle message processing.
+- **Concurrency**:
+  - Goroutines are employed for listening to incoming connections, reading from stdin, and sending messages to the server.
+
+### 2. **Chat Room Management**
+- **Purpose**: Hub to track all active clients and broadcast messages.
+- **Key Components**:
+  - `clients`: A map to manage active clients by their connection addresses.
+  - `Broadcast()`: Sends a message to all connected clients.
+  - `Join()`: Adds a new client to the chat room.
+
+### 3. **Message Format**
+- **Purpose**: Standardized format for chat messages, ensuring clarity and consistency.
+- **Implementation**:
+  - `Message` struct encapsulates the timestamp, client, and text.
+  - ANSI color codes differentiate message components visually.
+
+### 4. **Peer-to-Peer Connectivity**
+- **Purpose**: Allows dynamic client discovery and connection.
+- **Implementation**:
+  - `/join` command broadcasts the client's port and name.
+  - `/dial` command connects to new peers.
+  - `/chatS` and `/chatR` commands handle chat history sharing.
+
+### 5. **Chat History**
+- **Purpose**: Synchronize past messages for new clients.
+- **Implementation**:
+  - Chat history is serialized and shared using JSON via `/chatS` and `/chatR`.
+
+---
+
+## Why This Design?
+1. **Concurrency**: 
+   - Go’s Goroutines make handling multiple clients efficient.
+2. **Simplicity**:
+   - Using the `net` package for TCP abstracts low-level socket operations.
+3. **Scalability**:
+   - Peer-to-peer architecture supports dynamic client addition.
+4. **Readability**:
+   - Modular and reusable components enable future enhancements.
+
