@@ -24,7 +24,7 @@ const (
 
 	PURPLE_CLR = "\033[35m"
 	CYAN_CLR = "\033[36m" 
-	BLACK_CLR = "\033[30m"
+	BLACK_CLR = "\033[1;30m"
 	YELLOW_CLR = "\033[33m"
 	GREEN_CLR = "\033[32m"
 	RESET_CLR = "\033[0m"
